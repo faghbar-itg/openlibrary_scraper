@@ -1,0 +1,16 @@
+{
+  "numFound": 1,
+  "numFoundExact": true,
+  "start": 0,
+  "docs": [
+    {
+      "key": "/works/OL123W",
+      "title": "Sample Book",
+      "author_name": ["Sample Author"],
+      "publisher": ["Sample Press"],
+      "publish_year": [2020],
+      "language": ["eng"],
+      "subject": ["Fiction"]
+    }
+  ]
+}
