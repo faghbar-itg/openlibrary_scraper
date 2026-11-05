@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from rapidfuzz.fuzz import ratio, token_set_ratio
 
 from openlibrary_scraper.config.settings import Settings
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.models.match_result import MatchResult
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.domain.services.text_normalizer import normalize_match_text
+from openlibrary_scraper.processing.books import BookRecord, normalize_match_text
+from openlibrary_scraper.requests.response_parser import Work
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    work: Work
+    title_score: float
+    author_score: float
+    publisher_score: float
+    year_score: float
+    language_score: float
+    subject_score: float
+    overall_score: float
+    status: str
+    reason: str
 
 
 WEIGHTS = {

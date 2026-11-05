@@ -1,15 +1,55 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
-from openlibrary_scraper.utils.errors import OutputError
+from openlibrary_scraper.errors import OutputError
 
 
 _SAFE_ID = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+class CheckpointStore:
+    def __init__(self, output_dir: Path) -> None:
+        self.path = output_dir / "checkpoints" / "current.json"
+        self.state: dict[str, Any] = {}
+
+    def initialize(self, resume: bool, fresh: bool) -> dict[str, Any]:
+        if resume and not fresh and self.path.is_file():
+            try:
+                with self.path.open("r", encoding="utf-8") as file:
+                    state = json.load(file)
+                if isinstance(state, dict) and isinstance(state.get("books"), dict):
+                    self.state = state
+                    return self.state
+            except (OSError, json.JSONDecodeError) as exc:
+                raise OutputError(f"Could not read checkpoint file {self.path}.") from exc
+        self.state = {"run_id": uuid.uuid4().hex, "books": {}}
+        self.save()
+        return self.state
+
+    @property
+    def run_id(self) -> str:
+        return str(self.state["run_id"])
+
+    def book_state(self, book_id: str) -> dict[str, Any]:
+        books = self.state.setdefault("books", {})
+        return books.setdefault(book_id, {"queries": {}, "status": "pending"})
+
+    def save(self) -> None:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".json.tmp")
+            with temporary.open("w", encoding="utf-8") as file:
+                json.dump(self.state, file, ensure_ascii=False, indent=2)
+                file.flush()
+            temporary.replace(self.path)
+        except OSError as exc:
+            raise OutputError(f"Could not save checkpoint file {self.path}.") from exc
 
 
 class RawResponseStore:
@@ -28,7 +68,11 @@ class RawResponseStore:
         return path
 
     def save_page(
-        self, run_id: str, book_id: str, page_index: int, payload: dict[str, Any],
+        self,
+        run_id: str,
+        book_id: str,
+        page_index: int,
+        payload: dict[str, Any],
         query: str | None = None,
     ) -> Path:
         path = self.book_dir(run_id, book_id, query) / f"page_{page_index:03d}.json"
@@ -90,9 +134,7 @@ class RawResponseStore:
     def save_metadata(
         self, run_id: str, book_id: str, metadata: dict[str, Any]
     ) -> None:
-        self._write_json(
-            self.book_dir(run_id, book_id) / "metadata.json", metadata
-        )
+        self._write_json(self.book_dir(run_id, book_id) / "metadata.json", metadata)
 
     def _details_dir(self, run_id: str, book_id: str) -> Path:
         return self.book_dir(run_id, book_id) / "details"

@@ -7,14 +7,37 @@ from typing import Any
 
 import requests
 
-from openlibrary_scraper.domain.models.search_result import SearchPage
-from openlibrary_scraper.infrastructure.openlibrary.response_parser import parse_search_page
-from openlibrary_scraper.utils.errors import SearchError
-from openlibrary_scraper.utils.retry_policy import backoff_seconds
+from openlibrary_scraper.requests.response_parser import SearchPage, parse_search_page
+from openlibrary_scraper.requests.query_builder import prepare_search_params
+from openlibrary_scraper.errors import SearchError
+from openlibrary_scraper.requests.retry import backoff_seconds
 
 
 LOGGER = logging.getLogger(__name__)
-SEARCH_URL = "https://openlibrary.org/search.json"
+WORK_ID = re.compile(r"^OL\d+W$")
+SEARCH_PATH = "/search.json"
+DETAIL_HEADERS = {
+    "User-Agent": "PostmanRuntime/2.12.2",
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+}
+
+
+def work_details_url(
+    work_id: str, api_base_url: str = "https://openlibrary.org"
+) -> str:
+    if not WORK_ID.fullmatch(work_id):
+        raise ValueError("Invalid Open Library Work ID.")
+    return f"{api_base_url.rstrip('/')}/works/{work_id}.json"
+
+
+def editions_url(
+    work_id: str, api_base_url: str = "https://openlibrary.org"
+) -> str:
+    if not WORK_ID.fullmatch(work_id):
+        raise ValueError("Invalid Open Library Work ID.")
+    return f"{api_base_url.rstrip('/')}/works/{work_id}/editions.json"
 
 
 class OpenLibrarySearchClient:
@@ -25,11 +48,16 @@ class OpenLibrarySearchClient:
         timeout: int,
         max_retries: int,
         session: requests.Session | None = None,
+        api_base_url: str = "https://openlibrary.org",
+        edition_page_size: int = 100,
     ) -> None:
         self.proxy_map = {"http": proxy_url, "https": proxy_url}
         self.timeout = timeout
         self.max_retries = max_retries
-        self.session = session or requests.Session()
+        self.api_base_url = api_base_url.rstrip("/")
+        self.edition_page_size = edition_page_size
+        self._owns_session = session is None
+        self.session = session if session is not None else requests.Session()
         self.session.headers.update({"Accept": "application/json", "User-Agent": user_agent})
         self.request_count = 0
         self.proxy_stats = {
@@ -41,18 +69,20 @@ class OpenLibrarySearchClient:
             "rotations": 0,
         }
 
+    def __enter__(self) -> OpenLibrarySearchClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        if self._owns_session:
+            self.session.close()
+
     def search_page(self, query: str, limit: int, offset: int) -> SearchPage:
         for attempt in range(self.max_retries + 1):
             self.request_count += 1
             try:
                 response = self.session.get(
-                    SEARCH_URL,
-                    params={
-                        "q": query,
-                        "fields": "key,title,author_name,publisher,publish_year,language,subject",
-                        "limit": limit,
-                        "offset": offset,
-                    },
+                    f"{self.api_base_url}{SEARCH_PATH}",
+                    params=prepare_search_params(query, limit, offset),
                     proxies=self.proxy_map,
                     timeout=self.timeout,
                 )
@@ -122,6 +152,19 @@ class OpenLibrarySearchClient:
                 time.sleep(delay)
         raise SearchError("Open Library search exhausted its retry budget.")
 
+    def get_work_details(self, work_id: str) -> Any:
+        return self.get_json(
+            work_details_url(work_id, self.api_base_url),
+            headers=DETAIL_HEADERS,
+        )
+
+    def get_editions_page(self, work_id: str, offset: int) -> Any:
+        return self.get_json(
+            editions_url(work_id, self.api_base_url),
+            params={"limit": self.edition_page_size, "offset": offset},
+            headers=DETAIL_HEADERS,
+        )
+
     def get_json(
         self,
         url: str,
@@ -162,7 +205,9 @@ class OpenLibrarySearchClient:
                 try:
                     return response.json()
                 except ValueError as exc:
-                    raise SearchError("Open Library returned invalid JSON for a details request.") from exc
+                    raise SearchError(
+                        "Open Library returned invalid JSON for a details request."
+                    ) from exc
             except SearchError:
                 raise
             except requests.RequestException as exc:

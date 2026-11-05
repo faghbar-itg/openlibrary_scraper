@@ -7,24 +7,66 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from openlibrary_scraper.config.settings import Settings
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.models.match_result import MatchResult
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.domain.services.query_builder import build_search_queries
-from openlibrary_scraper.domain.services.scoring_service import score_work, select_matches
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.application.pagination_service import (
+from openlibrary_scraper.processing.books import BookRecord, read_books
+from openlibrary_scraper.processing.matching import (
+    MatchResult,
+    score_work,
+    select_matches,
+)
+from openlibrary_scraper.requests.pagination import (
     PaginationService,
     RetrievalResult,
 )
-from openlibrary_scraper.application.metadata_service import OpenLibraryMetadataService
-from openlibrary_scraper.processing.input_reader import read_books
-from openlibrary_scraper.reporting.exporter import export_results
-from openlibrary_scraper.utils.errors import ScraperError
-
-
+from openlibrary_scraper.processing.metadata import OpenLibraryMetadataService
+from openlibrary_scraper.processing.export import export_results
+from openlibrary_scraper.errors import ScraperError
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.requests.client import (
+    OpenLibrarySearchClient,
+)
+from openlibrary_scraper.requests.query_builder import build_search_queries
 LOGGER = logging.getLogger(__name__)
+
+
+def run_pipeline(settings: Settings, start_fresh: bool = False) -> dict[str, Any]:
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoints = CheckpointStore(settings.output_dir)
+    checkpoints.initialize(
+        settings.resume_enabled,
+        settings.start_fresh or start_fresh,
+    )
+    raw_store = RawResponseStore(settings.output_dir)
+
+    with OpenLibrarySearchClient(
+        settings.proxy_url,
+        settings.user_agent,
+        settings.request_timeout,
+        settings.max_retries,
+        api_base_url=settings.api_base_url,
+        edition_page_size=settings.edition_page_size,
+    ) as client:
+        pagination = PaginationService(
+            client,
+            raw_store,
+            checkpoints,
+            settings.page_size,
+            settings.max_pages,
+        )
+        metadata = OpenLibraryMetadataService(
+            client,
+            raw_store,
+            checkpoints,
+            settings.max_pages,
+        )
+        return SearchPipeline(
+            settings,
+            pagination,
+            raw_store,
+            checkpoints,
+            client.proxy_stats,
+            lambda: client.request_count,
+            metadata,
+        ).run()
 
 
 def _joined(values: tuple[str, ...] | tuple[int, ...]) -> str:
@@ -153,7 +195,7 @@ class SearchPipeline:
 
             retrieval: RetrievalResult | None = None
             try:
-                queries = build_search_queries(book)
+                queries = build_search_queries(book.title, book.author)
                 retrieval = self.pagination.retrieve(book.book_id, queries)
                 scored = [
                     score_work(book, work, self.settings)
@@ -164,7 +206,11 @@ class SearchPipeline:
                 chosen, status = select_matches(
                     scored, self.settings.ambiguity_delta
                 )
-                reason = chosen.reason if chosen else "No candidate met the configured match threshold."
+                reason = (
+                    chosen.reason
+                    if chosen
+                    else "No candidate met the configured match threshold."
+                )
                 ranked = sorted(
                     (match for match in scored if match.work.work_id),
                     key=lambda match: match.overall_score,
@@ -185,7 +231,8 @@ class SearchPipeline:
                         status = "POSSIBLE_MATCH"
                 if not retrieval.complete:
                     warnings.append(
-                        f"{book.book_id}: search incomplete; selected match may be based on partial results."
+                        f"{book.book_id}: search incomplete; "
+                        "selected match may be based on partial results."
                     )
                 warnings.extend(
                     f"{book.book_id}: {warning}" for warning in retrieval.uncertainty

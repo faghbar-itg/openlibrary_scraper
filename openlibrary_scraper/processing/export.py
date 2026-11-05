@@ -7,7 +7,7 @@ from typing import Any, Callable
 import pandas as pd
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
-from openlibrary_scraper.utils.errors import OutputError
+from openlibrary_scraper.errors import OutputError
 
 
 def _excel_safe_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:

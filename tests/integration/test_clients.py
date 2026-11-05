@@ -8,17 +8,19 @@ import pytest
 import requests
 from openpyxl import Workbook, load_workbook
 
-from openlibrary_scraper.application.pagination_service import PaginationService
-from openlibrary_scraper.application.metadata_service import OpenLibraryMetadataService
-from openlibrary_scraper.application.search_pipeline import SearchPipeline
+from openlibrary_scraper.requests.pagination import PaginationService
+from openlibrary_scraper.processing.metadata import OpenLibraryMetadataService
+from openlibrary_scraper.processing.pipeline import SearchPipeline
 from openlibrary_scraper.config.settings import Settings
-from openlibrary_scraper.domain.models.search_result import SearchPage
-from openlibrary_scraper.infrastructure.openlibrary.search_client import (
+from openlibrary_scraper.requests.response_parser import SearchPage, parse_search_page
+from openlibrary_scraper.requests.client import (
     OpenLibrarySearchClient,
+    editions_url,
+    work_details_url,
 )
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.utils.errors import SearchError
+from openlibrary_scraper.requests.query_builder import prepare_search_params
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.errors import SearchError
 
 
 class _Response:
@@ -47,7 +49,7 @@ class _SearchSession:
 
 def test_search_client_reuses_proxy_for_http_and_https(monkeypatch) -> None:
     monkeypatch.setattr(
-        "openlibrary_scraper.infrastructure.openlibrary.search_client.time.sleep",
+        "openlibrary_scraper.requests.client.time.sleep",
         lambda _: None,
     )
     proxy_url = "http://encoded-user:encoded-password@proxy.example:8080"
@@ -62,6 +64,29 @@ def test_search_client_reuses_proxy_for_http_and_https(monkeypatch) -> None:
     assert isinstance(result, SearchPage)
     assert len(session.calls) == 2
     assert all(call["proxies"] == expected for call in session.calls)
+    assert session.calls[0]["params"] == {
+        "q": 'title:"A Book"',
+        "fields": "key,title,author_name,publisher,publish_year,language,subject",
+        "limit": 10,
+        "offset": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("query", "limit", "offset"),
+    [
+        ("", 10, 0),
+        ("title:test", 0, 0),
+        ("title:test", 10, -1),
+        ("title:test", True, 0),
+        ("title:test", 10, False),
+    ],
+)
+def test_prepare_search_params_rejects_invalid_values(
+    query: str, limit: int, offset: int
+) -> None:
+    with pytest.raises(ValueError):
+        prepare_search_params(query, limit, offset)
 
 
 def test_search_client_reports_proxy_authentication_failure() -> None:
@@ -90,14 +115,34 @@ def test_details_request_uses_existing_proxy_client_and_required_headers() -> No
         "Connection": "keep-alive",
     }
 
-    payload = client.get_json(
-        "https://openlibrary.org/works/OL1W.json", headers=headers
-    )
+    payload = client.get_work_details("OL1W")
 
     assert payload == {"key": "/works/OL1W"}
     assert session.calls[0]["url"] == "https://openlibrary.org/works/OL1W.json"
     assert session.calls[0]["headers"] == headers
     assert session.calls[0]["proxies"] == {"http": proxy_url, "https": proxy_url}
+
+
+def test_editions_request_uses_configured_api_and_page_size() -> None:
+    session = _SearchSession([_Response(200, {"size": 0, "entries": []})])
+    client = OpenLibrarySearchClient(
+        "******proxy.example:8080",
+        "configured-agent",
+        3,
+        0,
+        session=session,  # type: ignore[arg-type]
+        api_base_url="https://api.example/v1/",
+        edition_page_size=25,
+    )
+
+    client.get_editions_page("OL1W", offset=50)
+
+    assert session.calls[0]["url"] == "https://api.example/v1/works/OL1W/editions.json"
+    assert session.calls[0]["params"] == {"limit": 25, "offset": 50}
+    assert session.calls[0]["proxies"] == {
+        "http": "******proxy.example:8080",
+        "https": "******proxy.example:8080",
+    }
 
 
 @pytest.mark.parametrize(
@@ -127,15 +172,13 @@ def test_search_client_reports_proxy_connection_failures(failure, message: str) 
 
 
 class _OnePageClient:
+    edition_page_size = 100
+
     def __init__(self) -> None:
         self.request_count = 0
 
     def search_page(self, query: str, limit: int, offset: int) -> SearchPage:
         self.request_count += 1
-        from openlibrary_scraper.infrastructure.openlibrary.response_parser import (
-            parse_search_page,
-        )
-
         assert offset == 0
         return parse_search_page(
             {
@@ -177,6 +220,15 @@ class _OnePageClient:
                 }
             ],
         }
+
+    def get_work_details(self, work_id: str) -> dict[str, Any]:
+        return self.get_json(work_details_url(work_id))
+
+    def get_editions_page(self, work_id: str, offset: int) -> dict[str, Any]:
+        return self.get_json(
+            editions_url(work_id),
+            params={"limit": self.edition_page_size, "offset": offset},
+        )
 
 
 def test_full_pipeline_creates_expected_outputs(tmp_path: Path) -> None:

@@ -6,18 +6,14 @@ from urllib.parse import urlparse
 
 from rapidfuzz.fuzz import token_set_ratio
 
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.domain.services.text_normalizer import (
+from openlibrary_scraper.processing.books import (
+    BookRecord,
     normalize_match_text,
-    normalized_values,
 )
-from openlibrary_scraper.infrastructure.openlibrary.search_client import (
-    OpenLibrarySearchClient,
-)
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.utils.errors import SearchError
+from openlibrary_scraper.requests.response_parser import Work, normalized_values
+from openlibrary_scraper.requests.client import OpenLibrarySearchClient
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.errors import SearchError
 
 
 WORK_ID = re.compile(r"^OL\d+W$")
@@ -47,15 +43,6 @@ LANGUAGE_NAMES = {
     "tur": "Turkish",
     "ukr": "Ukrainian",
 }
-DETAIL_HEADERS = {
-    "User-Agent": "PostmanRuntime/2.12.2",
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-}
-EDITIONS_PAGE_SIZE = 100
-
-
 def extract_work_id(work: Work) -> str | None:
     key = work.raw.get("key")
     if isinstance(key, str):
@@ -66,18 +53,6 @@ def extract_work_id(work: Work) -> str | None:
     if isinstance(work.work_id, str) and WORK_ID.fullmatch(work.work_id):
         return work.work_id
     return None
-
-
-def work_details_url(work_id: str) -> str:
-    if not WORK_ID.fullmatch(work_id):
-        raise ValueError("Invalid Open Library Work ID.")
-    return f"https://openlibrary.org/works/{work_id}.json"
-
-
-def editions_url(work_id: str) -> str:
-    if not WORK_ID.fullmatch(work_id):
-        raise ValueError("Invalid Open Library Work ID.")
-    return f"https://openlibrary.org/works/{work_id}/editions.json"
 
 
 def edition_id_from_key(key: object) -> str | None:
@@ -350,9 +325,7 @@ class OpenLibraryMetadataService:
             self.checkpoints.run_id, book_id, work_id
         )
         if payload is None:
-            response = self.client.get_json(
-                work_details_url(work_id), headers=DETAIL_HEADERS
-            )
+            response = self.client.get_work_details(work_id)
             if not isinstance(response, dict) or response.get("error"):
                 raise SearchError("Open Library returned a malformed Work record.")
             payload = response
@@ -369,7 +342,6 @@ class OpenLibraryMetadataService:
         editions: list[dict[str, Any]] = []
         errors: list[str] = []
         offset = 0
-        url = editions_url(work_id)
         edition_state = state.setdefault("editions", {})
 
         for page_index in range(self.max_pages):
@@ -378,11 +350,7 @@ class OpenLibraryMetadataService:
                     self.checkpoints.run_id, book_id, work_id, page_index
                 )
                 if payload is None:
-                    response = self.client.get_json(
-                        url,
-                        params={"limit": EDITIONS_PAGE_SIZE, "offset": offset},
-                        headers=DETAIL_HEADERS,
-                    )
+                    response = self.client.get_editions_page(work_id, offset)
                     if not isinstance(response, dict):
                         raise SearchError("Open Library returned a malformed Editions response.")
                     payload = response
@@ -428,10 +396,13 @@ class OpenLibraryMetadataService:
             if total is not None and offset >= total:
                 edition_state["complete"] = True
                 break
-            if not has_next and total is None and len(entries) < EDITIONS_PAGE_SIZE:
+            if (
+                not has_next
+                and total is None
+                and len(entries) < self.client.edition_page_size
+            ):
                 edition_state["complete"] = True
                 break
-            url = editions_url(work_id)
         else:
             errors.append(f"Edition pagination reached the limit of {self.max_pages} pages.")
             edition_state["complete"] = False

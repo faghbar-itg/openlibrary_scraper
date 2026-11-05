@@ -7,8 +7,8 @@ import pandas as pd
 from openpyxl import load_workbook
 import pytest
 
-from openlibrary_scraper.reporting.exporter import export_results
-from openlibrary_scraper.utils.errors import OutputError
+from openlibrary_scraper.processing.export import export_results
+from openlibrary_scraper.errors import OutputError
 
 
 def test_export_results_removes_excel_illegal_characters_only_from_workbooks(

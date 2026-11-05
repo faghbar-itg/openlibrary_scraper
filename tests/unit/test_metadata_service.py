@@ -4,22 +4,25 @@ from typing import Any
 
 import pytest
 
-from openlibrary_scraper.application.metadata_service import (
-    DETAIL_HEADERS,
+from openlibrary_scraper.processing.metadata import (
     OpenLibraryMetadataService,
-    editions_url,
     extract_work_id,
     select_edition,
+)
+from openlibrary_scraper.processing.books import BookRecord
+from openlibrary_scraper.requests.response_parser import Work
+from openlibrary_scraper.requests.client import (
+    DETAIL_HEADERS,
+    editions_url,
     work_details_url,
 )
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.utils.errors import SearchError
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.errors import SearchError
 
 
 class _Client:
+    edition_page_size = 100
+
     def __init__(self, responses: list[dict[str, Any]]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -27,6 +30,16 @@ class _Client:
     def get_json(self, url: str, params=None, headers=None) -> dict[str, Any]:
         self.calls.append((url, {"params": params, "headers": headers}))
         return self.responses.pop(0)
+
+    def get_work_details(self, work_id: str) -> dict[str, Any]:
+        return self.get_json(work_details_url(work_id), headers=DETAIL_HEADERS)
+
+    def get_editions_page(self, work_id: str, offset: int) -> dict[str, Any]:
+        return self.get_json(
+            editions_url(work_id),
+            params={"limit": self.edition_page_size, "offset": offset},
+            headers=DETAIL_HEADERS,
+        )
 
 
 def _book(
@@ -315,6 +328,8 @@ def test_no_matching_edition_keeps_work_metadata_and_null_edition_url(tmp_path) 
 
 def test_missing_work_details_is_reported_without_losing_search_metadata(tmp_path) -> None:
     class MissingWorkClient:
+        edition_page_size = 100
+
         def __init__(self) -> None:
             self.edition_calls = 0
 
@@ -323,6 +338,16 @@ def test_missing_work_details_is_reported_without_losing_search_metadata(tmp_pat
                 raise SearchError("Open Library record was not found.")
             self.edition_calls += 1
             return {"size": 0, "entries": []}
+
+        def get_work_details(self, work_id: str) -> dict[str, Any]:
+            return self.get_json(work_details_url(work_id), headers=DETAIL_HEADERS)
+
+        def get_editions_page(self, work_id: str, offset: int) -> dict[str, Any]:
+            return self.get_json(
+                editions_url(work_id),
+                params={"limit": self.edition_page_size, "offset": offset},
+                headers=DETAIL_HEADERS,
+            )
 
     client = MissingWorkClient()
     service, _, _ = _service(tmp_path, client)  # type: ignore[arg-type]

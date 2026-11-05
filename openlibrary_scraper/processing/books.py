@@ -2,16 +2,56 @@ from __future__ import annotations
 
 import logging
 import math
+import re
+import unicodedata
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.services.text_normalizer import normalize_source_text
-from openlibrary_scraper.utils.errors import InputValidationError
+from openlibrary_scraper.errors import InputValidationError
+
+
+_NON_ALPHANUMERIC = re.compile(r"[^\w]+", flags=re.UNICODE)
+_SPACE = re.compile(r"\s+")
+
+
+@dataclass(frozen=True)
+class BookRecord:
+    book_id: str
+    source_row: int
+    original: dict[str, Any]
+    normalized: dict[str, str]
+    publication_year: int | None
+    valid: bool
+    validation_errors: tuple[str, ...] = ()
+    duplicate_of: str | None = None
+
+    @property
+    def title(self) -> str:
+        return self.normalized["book_title"]
+
+    @property
+    def author(self) -> str:
+        return self.normalized["author"]
+
+
+def normalize_source_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = unicodedata.normalize("NFKC", str(value))
+    return _SPACE.sub(" ", text).strip()
+
+
+def normalize_match_text(value: object) -> str:
+    text = normalize_source_text(value).casefold()
+    text = _NON_ALPHANUMERIC.sub(" ", text)
+    return _SPACE.sub(" ", text).strip()
 
 
 LOGGER = logging.getLogger(__name__)
@@ -30,6 +70,10 @@ def _cell_value(value: Any) -> Any:
     if isinstance(value, float) and math.isnan(value):
         return None
     return value
+
+
+def _value_at(row: tuple[Any, ...], position: int) -> Any:
+    return _cell_value(row[position] if position < len(row) else None)
 
 
 def _year(value: Any) -> int | None:
@@ -79,12 +123,12 @@ def _read_workbook_records(workbook: Any) -> list[BookRecord]:
     seen: dict[tuple[str, ...], str] = {}
     for row_number, values in enumerate(rows, start=2):
         record = {
-            column: _cell_value(values[positions[column]] if positions[column] < len(values) else None)
+            column: _value_at(values, positions[column])
             for column in REQUIRED_COLUMNS
         }
         record.update(
             {
-                column: _cell_value(values[positions[column]] if positions[column] < len(values) else None)
+                column: _value_at(values, positions[column])
                 for column in OPTIONAL_COLUMNS
                 if column in positions
             }

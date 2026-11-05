@@ -25,7 +25,3 @@ def backoff_seconds(attempt: int, retry_after: str | None = None) -> float:
     if specified is not None:
         return specified
     return min(60.0, (2**attempt) + random.uniform(0, 0.5))
-
-
-def retry_after_value(value: str | None) -> float | None:
-    return retry_after_seconds(value)

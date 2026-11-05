@@ -2,24 +2,32 @@
 
 ## Purpose and scope
 
-This project implements Part 1 of the Open Library data-enrichment pipeline. It reads book metadata from Excel, searches the Open Library Search API through the configured Node4 proxy, retrieves paginated Work results, scores candidates, and exports traceable results. It does not retrieve Editions, Work details, or Author details.
+The scraper reads book metadata from Excel, searches the Open Library Search API through the configured Node4 proxy, retrieves paginated Work results, scores candidates, and fetches Work details and paginated Editions for selected matches. It exports candidate scores, selected matches, a run report, and one consolidated metadata record per input book.
 
 ## Architecture
 
-`main.py` wires configuration and the Open Library search client, pagination, checkpointing, and exports. The `openlibrary_scraper` package separates configuration, domain matching, external integrations, input processing, persistence, and reporting. See [docs/architecture.md](docs/architecture.md) and [docs/data_flow.md](docs/data_flow.md).
+`main.py` loads settings and starts `processing/pipeline.py`. The package has three focused areas: configuration, Open Library requests, and post-response processing. See [docs/architecture.md](docs/architecture.md) and [docs/data_flow.md](docs/data_flow.md).
 
 ## Project layout
 
 ```text
 main.py
 openlibrary_scraper/
-  application/       Search pipeline and dynamic pagination
-  config/            Validated environment settings
-  domain/             Book/Work models, query and scoring services
-  infrastructure/     Open Library, raw storage and checkpoints
-  processing/          Excel reader and input validation
-  reporting/           Excel, CSV and JSON output generation
-  utils/               Errors and logging
+  config/
+    settings.py       Environment and scraper configuration
+  requests/
+    client.py         Search, Work and Edition requests with proxy/retries
+    pagination.py     Search API pagination and query fallback
+    response_parser.py
+    retry.py
+  processing/
+    books.py          Excel input, book records and text normalization
+    matching.py       Candidate scoring and selection
+    metadata.py       Edition selection and final metadata mapping
+    pipeline.py       End-to-end workflow and orchestration
+    storage.py        Checkpoints and cached raw API responses
+    export.py         Excel, CSV and JSON output generation
+  errors.py           Shared scraper exceptions
 data/
   input/books.xlsx
   output/               Created at runtime
@@ -53,6 +61,7 @@ NODE4_PASSWORD=
 ```
 
 All four values are required before the scraper starts. The username and password are URL-encoded when the authenticated proxy URL is built. Both HTTP and HTTPS requests use this single configured proxy; there is no direct-connection fallback.
+`OPENLIBRARY_BASE_URL` optionally changes the API base URL (default `https://openlibrary.org`), and `EDITION_PAGE_SIZE` configures Edition page size (default `100`).
 
 ## Run
 

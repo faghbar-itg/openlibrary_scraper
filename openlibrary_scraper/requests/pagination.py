@@ -4,13 +4,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from openlibrary_scraper.domain.models.search_result import SearchPage
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.infrastructure.openlibrary.response_parser import parse_search_page
-from openlibrary_scraper.infrastructure.openlibrary.search_client import OpenLibrarySearchClient
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.utils.errors import SearchError
+from openlibrary_scraper.requests.response_parser import (
+    SearchPage,
+    Work,
+    parse_search_page,
+)
+from openlibrary_scraper.requests.client import OpenLibrarySearchClient
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.errors import SearchError
 
 
 LOGGER = logging.getLogger(__name__)

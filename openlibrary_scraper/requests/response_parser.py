@@ -1,15 +1,48 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
-from openlibrary_scraper.domain.models.search_result import SearchPage
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.domain.services.text_normalizer import normalized_values
-from openlibrary_scraper.utils.errors import SearchError
+from openlibrary_scraper.errors import SearchError
 
 
 _WORK_KEY = re.compile(r"^/works/(OL\d+W)$")
+
+
+@dataclass(frozen=True)
+class Work:
+    work_id: str | None
+    work_url: str | None
+    title: str
+    authors: tuple[str, ...]
+    publishers: tuple[str, ...]
+    publication_years: tuple[int, ...]
+    languages: tuple[str, ...]
+    subjects: tuple[str, ...]
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SearchPage:
+    num_found: int | None
+    num_found_exact: bool | None
+    start: int | None
+    docs: tuple[Work, ...]
+    raw: dict[str, Any]
+
+
+def normalized_values(values: object) -> tuple[str, ...]:
+    if isinstance(values, str):
+        return (values,) if values else ()
+    if isinstance(values, Iterable):
+        return tuple(
+            str(value)
+            for value in values
+            if value is not None and str(value).strip()
+        )
+    return ()
 
 
 def _years(values: object) -> tuple[int, ...]:

@@ -5,21 +5,22 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from openlibrary_scraper.application.pagination_service import PaginationService
+from openlibrary_scraper.requests.pagination import PaginationService
 from openlibrary_scraper.config.settings import Settings, load_settings
-from openlibrary_scraper.domain.models.book import BookRecord
-from openlibrary_scraper.domain.models.search_result import SearchPage
-from openlibrary_scraper.domain.models.work import Work
-from openlibrary_scraper.domain.services.query_builder import build_search_queries
-from openlibrary_scraper.domain.services.scoring_service import score_work
-from openlibrary_scraper.domain.services.text_normalizer import normalize_match_text
-from openlibrary_scraper.infrastructure.openlibrary.response_parser import (
+from openlibrary_scraper.processing.books import (
+    BookRecord,
+    normalize_match_text,
+    read_books,
+)
+from openlibrary_scraper.processing.matching import score_work
+from openlibrary_scraper.requests.query_builder import build_search_queries
+from openlibrary_scraper.requests.response_parser import (
+    SearchPage,
+    Work,
     parse_search_page,
 )
-from openlibrary_scraper.infrastructure.storage.checkpoint_store import CheckpointStore
-from openlibrary_scraper.infrastructure.storage.raw_response_store import RawResponseStore
-from openlibrary_scraper.processing.input_reader import read_books
-from openlibrary_scraper.utils.errors import (
+from openlibrary_scraper.processing.storage import CheckpointStore, RawResponseStore
+from openlibrary_scraper.errors import (
     ConfigurationError,
     InputValidationError,
     SearchError,
@@ -70,7 +71,7 @@ def _work(key: str, title: str = "Sample Book") -> Work:
 
 def test_normalization_and_query_escaping() -> None:
     assert normalize_match_text("  Café—Books   & Stories ") == "café books stories"
-    primary, fallback = build_search_queries(_book())
+    primary, fallback = build_search_queries(_book().title, _book().author)
     assert primary == 'title:"A \\"Quoted\\" Tale" AND author:"O\'Neil"'
     assert fallback == 'title:"A \\"Quoted\\" Tale"'
 
@@ -153,10 +154,14 @@ def test_load_settings_url_encodes_node4_credentials(monkeypatch) -> None:
         "NODE4_PORT": "8080",
         "NODE4_USERNAME": "name@domain",
         "NODE4_PASSWORD": "s:p /#",
+        "OPENLIBRARY_BASE_URL": "https://api.example/v1/",
+        "EDITION_PAGE_SIZE": "25",
     }.items():
         monkeypatch.setenv(name, value)
 
     settings = load_settings()
+    assert settings.api_base_url == "https://api.example/v1"
+    assert settings.edition_page_size == 25
 
     assert (
         settings.proxy_url

@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from dotenv import load_dotenv
 
-from openlibrary_scraper.utils.errors import ConfigurationError
+from openlibrary_scraper.errors import ConfigurationError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +53,8 @@ class Settings:
     high_confidence_threshold: float
     possible_match_threshold: float
     ambiguity_delta: float
+    api_base_url: str = "https://openlibrary.org"
+    edition_page_size: int = 100
 
 
 def load_settings() -> Settings:
@@ -82,9 +84,25 @@ def load_settings() -> Settings:
         possible_threshold = float(os.getenv("POSSIBLE_MATCH_THRESHOLD", "0.60"))
         ambiguity_delta = float(os.getenv("AMBIGUITY_DELTA", "0.03"))
     except ValueError as exc:
-        raise ConfigurationError("Match thresholds must be numeric values between 0 and 1.") from exc
-    if not (0 <= possible_threshold <= high_threshold <= 1 and 0 <= ambiguity_delta <= 1):
+        raise ConfigurationError(
+            "Match thresholds must be numeric values between 0 and 1."
+        ) from exc
+    valid_thresholds = 0 <= possible_threshold <= high_threshold <= 1
+    valid_ambiguity_delta = 0 <= ambiguity_delta <= 1
+    if not valid_thresholds or not valid_ambiguity_delta:
         raise ConfigurationError("Match thresholds must satisfy 0 <= possible <= high <= 1.")
+
+    api_base_url = os.getenv(
+        "OPENLIBRARY_BASE_URL", "https://openlibrary.org"
+    ).rstrip("/")
+    api_parts = urlsplit(api_base_url)
+    if (
+        api_parts.scheme not in {"http", "https"}
+        or not api_parts.netloc
+        or api_parts.query
+        or api_parts.fragment
+    ):
+        raise ConfigurationError("OPENLIBRARY_BASE_URL must be an absolute HTTP(S) URL.")
 
     root = PROJECT_ROOT
     input_file = Path(os.getenv("INPUT_FILE", "data/input/books.xlsx"))
@@ -112,4 +130,6 @@ def load_settings() -> Settings:
         high_confidence_threshold=high_threshold,
         possible_match_threshold=possible_threshold,
         ambiguity_delta=ambiguity_delta,
+        api_base_url=api_base_url,
+        edition_page_size=_int("EDITION_PAGE_SIZE", 100),
     )
