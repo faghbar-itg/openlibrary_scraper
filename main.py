@@ -1,44 +1,48 @@
 from __future__ import annotations
 
-import argparse
 import logging
 import sys
+import traceback
 
-from openlibrary_scraper.config.settings import load_settings
-from openlibrary_scraper.errors import ScraperError
-from openlibrary_scraper.processing.pipeline import run_pipeline
+from config.settings import load_settings
+from processing.data_processor import run_pipeline
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Search Open Library for input books.")
-    parser.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Start a new run instead of resuming the saved checkpoint.",
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    arguments = parser.parse_args()
-
     try:
+        LOGGER.info("Starting Open Library Scraper.")
+        LOGGER.info("Loading configuration.")
         settings = load_settings()
-        logging.basicConfig(
-            level=getattr(logging, settings.log_level, logging.INFO),
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
-        report = run_pipeline(settings, start_fresh=arguments.fresh)
+        logging.getLogger().setLevel(getattr(logging, settings.log_level, logging.INFO))
+        LOGGER.info("Node4 proxy configuration loaded.")
+        LOGGER.info("Input file: %s", settings.input_file)
+        LOGGER.info("Page size: %s", settings.page_size)
+        LOGGER.info("Maximum pages: %s", settings.max_pages)
+        report = run_pipeline(settings)
 
-        print(
-            f"Run {report['run_id']} finished: "
-            f"{report['successfully_processed_books']}/{report['total_input_books']} "
-            f"complete searches, {report['total_work_candidates']} candidates."
+        LOGGER.info(
+            "Execution finished with status %s; %s/%s complete searches, %s candidates.",
+            report["execution_status"],
+            report["successfully_processed_books"],
+            report["total_input_books"],
+            report["total_work_candidates"],
         )
-        print(f"Outputs: {settings.output_dir}")
+        print(
+            f"Finished: {report['successfully_processed_books']}/"
+            f"{report['total_input_books']} complete searches, "
+            f"{report['total_work_candidates']} candidates."
+        )
+        print(f"Final results: {report['output_file']}")
         return 0
-    except ScraperError as exc:
-        LOGGER.error("%s", exc)
-        print(f"Error: {exc}", file=sys.stderr)
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
         return 1
 
 

@@ -1,1 +1,0 @@
-"""Mocked integration tests."""

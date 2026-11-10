@@ -1,0 +1,618 @@
+# Task: Simplify and Refactor the Entire OpenLibrary Scraper
+
+## 1. Main Objective
+
+I want you to refactor the entire project to make it extremely simple, readable, and easy to understand.
+
+The current implementation works, but its architecture is unnecessarily complicated for the actual task.
+
+It contains too many files, too many small functions, excessive abstractions, and unnecessary layers of communication between modules.
+
+**The goal is NOT to build a more sophisticated system. The goal is to build the simplest professional implementation that correctly performs the required task.**
+
+The final code must be understandable and reviewable by a fresh software engineer who is still developing programming experience.
+
+I want to be able to open the project, start from `main.py`, and understand exactly what happens, follow every function call, trace every API request and response, and understand where every result goes.
+
+Prioritize simplicity, readability, and maintainability over architectural complexity.
+
+---
+
+## 2. Strict File Structure
+
+Keep the production Python implementation in a small set of files, grouped into three responsibility-based folders.
+
+Use this structure:
+
+```text
+project/
+│
+├── main.py
+├── config/
+│   └── settings.py
+├── requests_apis/
+│   └── requests_handler.py
+├── processing/
+│   ├── data_processor.py
+│   └── storage.py
+│
+├── .env
+├── .env.example
+├── requirements.txt
+├── README.md
+│
+├── data/
+│   └── input/
+│       └── books.xlsx
+│
+└── data/
+    └── output/
+```
+
+Responsibilities:
+
+### 1. main.py
+The main entry point.
+
+Responsible for:
+- Starting the application.
+- Loading settings.
+- Initializing logging.
+- Reading the input.
+- Calling the main processing workflow.
+- Printing the final execution summary.
+- Handling top-level errors.
+
+Keep the execution flow visible and easy to follow.
+
+### 2. config/settings.py
+Responsible for:
+- Loading environment variables.
+- Reading Node4 proxy credentials.
+- Constructing the proxy configuration.
+- Defining API settings.
+- Defining pagination settings.
+- Defining matching thresholds.
+- Validating required configuration.
+
+Do not create unnecessary configuration classes or abstractions.
+
+### 3. requests_apis/requests_handler.py
+Responsible for ALL HTTP communication with Open Library.
+
+This includes:
+- Preparing Search API parameters.
+- Sending Search API requests.
+- Handling pagination-related API requests.
+- Retries and timeouts.
+- Handling HTTP errors.
+- Receiving and validating JSON responses.
+- Fetching Work details.
+- Fetching Edition pages.
+
+Keep all API-related operations in this file.
+
+I want to clearly see where requests are created, sent, received, and returned.
+
+### 4. processing/data_processor.py
+Responsible for the actual data-processing workflow.
+
+This includes:
+- Reading the Excel input.
+- Validating input records.
+- Normalizing titles and authors.
+- Building search queries.
+- Processing Search API results.
+- Matching input books with Open Library Works.
+- Calculating match scores.
+- Selecting the best Work.
+- Selecting the best Edition.
+- Building the final metadata records.
+- Managing the sequential processing of books.
+
+Avoid splitting these operations into many unnecessary helper modules.
+
+### 5. processing/storage.py
+Responsible for:
+- Saving final results.
+- Updating the checkpoint.
+- Resuming interrupted executions.
+- Exporting Excel, CSV, and JSON files.
+- Creating the execution report.
+
+Keep storage operations straightforward.
+
+**Important:** This is the maximum number of production Python files, not a target that must be filled unnecessarily. If two responsibilities can be combined without making the code harder to read, prefer the simpler solution.
+
+The user explicitly requested removing all test files; do not restore them unless asked.
+
+---
+
+## 3. Eliminate Unnecessary Complexity
+
+Review the entire existing codebase and identify unnecessary complexity.
+
+Specifically:
+
+### A. Too Many Functions
+
+I do not want a function for every two or three lines of code.
+
+Avoid creating functions that:
+- Only return another function's result without adding meaningful value.
+- Simply pass parameters to another function.
+- Perform a trivial operation used only once.
+- Exist only to create additional architectural layers.
+- Make the execution flow harder to follow.
+
+Combine related operations when this makes the code easier to understand.
+
+However, do not combine everything into one enormous function.
+
+Create functions when they represent a meaningful operation or make the code easier to read.
+
+### B. Avoid Unnecessary Abstractions
+
+Remove unnecessary:
+- Classes.
+- Interfaces.
+- Service layers.
+- Wrapper functions.
+- Data-transfer objects.
+- Dependency injection structures.
+- Complex inheritance.
+- Generic frameworks.
+- Overengineered error-handling systems.
+
+Use straightforward Python functions, dictionaries, lists, and simple classes only when genuinely necessary.
+
+Do not introduce design patterns just for the sake of using design patterns.
+
+### C. Avoid Unnecessary Data Structures
+
+Do not create multiple representations of the same data unless there is a clear reason.
+
+Prefer simple and understandable data structures.
+
+For example, avoid transforming the same API response through several unnecessary models before it reaches the matching logic.
+
+---
+
+## 4. Preserve Existing Functionality and Results
+
+This requirement is critical.
+
+**The refactoring must NOT break the current working project or change the expected final results.**
+
+Before modifying anything:
+
+1. Inspect the entire existing implementation.
+2. Understand the current execution flow.
+3. Run the existing test suite.
+4. Record the current output structure and matching behavior.
+5. Identify the essential functionality that must be preserved.
+
+The refactored implementation must preserve:
+
+- Node4 authenticated proxy support.
+- Open Library Search API integration.
+- Search query construction.
+- Pagination behavior.
+- Correct offset calculation using the actual number of returned documents.
+- Reading `numFound`, `numFoundExact`, `start`, and `docs`.
+- Configurable page size and `max_pages`.
+- Work ID deduplication.
+- Title and author matching.
+- Existing matching weights and thresholds.
+- Ambiguity detection.
+- Fallback search queries.
+- Work details retrieval.
+- Edition pagination and selection.
+- Final metadata mapping.
+- Error handling and incomplete-search detection.
+- Resume functionality.
+- Existing final output fields and their meanings.
+
+Do not silently remove functionality just because its implementation is complicated.
+
+If you believe something is unnecessary, verify that removing it will not change the final results or required behavior.
+
+---
+
+## 5. Simplify Data Storage
+
+The final results are what matter.
+
+I do NOT need to store the original Excel row data or preserve unnecessary copies of input records.
+
+The application should read the input, process it, and produce the final results.
+
+Simplify persistence as follows:
+
+- Store the final processed results.
+- Store only the minimum checkpoint information required for recovery.
+- Keep the book identifier and processing status where needed.
+- Avoid saving entire input rows.
+- Avoid duplicating the same information across multiple files.
+- Avoid storing raw API responses unless they are genuinely required for recovery or correctness.
+
+The checkpoint should be simple and understandable.
+
+For example, it should be possible to identify:
+- Which books have been processed.
+- Which books are still pending.
+- Which searches are incomplete.
+- Which final results have already been saved.
+
+Do not introduce a complicated storage architecture.
+
+### Data-loss protection
+
+Save results progressively so that an interruption does not destroy already completed work.
+
+Do not mark a book as completed before its final result has been successfully persisted.
+
+The final output must remain consistent with the current implementation.
+
+---
+
+## 6. Detailed Logging and Execution Tracing
+
+Logging is extremely important.
+
+I want to understand exactly what the program is doing by reading the terminal logs.
+
+The logs must provide a clear execution trace without requiring me to inspect the debugger.
+
+Use Python's standard `logging` module.
+
+Every important operation should produce a meaningful log message.
+
+### A. Application startup
+
+Example:
+
+```text
+[INFO] Starting OpenLibrary Scraper
+[INFO] Loading configuration
+[INFO] Node4 proxy configuration loaded
+[INFO] Input file: data/input/books.xlsx
+[INFO] Page size: 100
+[INFO] Maximum pages: 10
+[INFO] Resume enabled: True
+```
+
+Never print proxy passwords or credentials.
+
+### B. Input processing
+
+```text
+[INFO] Reading input workbook
+[INFO] Total valid records: 20
+[INFO] Invalid records: 2
+[INFO] Starting book 1/20
+[INFO] Book title: The Hobbit
+[INFO] Author: J.R.R. Tolkien
+```
+
+### C. API requests
+
+For every request, show:
+
+```text
+[INFO] Sending Search API request
+[INFO] Query: title:"The Hobbit" AND author:"J.R.R. Tolkien"
+[INFO] Offset: 0
+[INFO] Limit: 100
+[INFO] Request attempt: 1/3
+```
+
+After receiving the response:
+
+```text
+[INFO] Search API response received
+[INFO] HTTP Status: 200
+[INFO] numFound: 250
+[INFO] start: 0
+[INFO] Documents returned: 100
+[INFO] Next offset: 100
+```
+
+### D. Pagination
+
+Clearly show:
+
+- Current page.
+- Current offset.
+- Expected total.
+- Documents returned.
+- Unique Work IDs.
+- Next offset.
+- Why pagination continues or stops.
+- Whether the search is complete or incomplete.
+
+### E. Matching
+
+For every important candidate, log:
+
+- Work ID.
+- Work title.
+- Title score.
+- Author score.
+- Publisher score.
+- Year score.
+- Language score.
+- Final weighted score.
+- Matching status.
+
+Then log the selected Work and explain why it was selected or rejected.
+
+### F. Metadata retrieval
+
+Show:
+- Selected Work ID.
+- Work details request.
+- Edition pages requested.
+- Number of Editions received.
+- Edition matching scores.
+- Selected Edition ID.
+- Missing metadata fields.
+- Final metadata status.
+
+### G. Saving results
+
+Show:
+- Result being saved.
+- Checkpoint updated.
+- Current progress.
+- Output files generated.
+- Final success or failure.
+
+### Logging requirements
+
+- Use consistent log levels: DEBUG, INFO, WARNING, ERROR.
+- Use clear and descriptive messages.
+- Include the book ID or index in relevant messages.
+- Include the page number and offset for pagination.
+- Include exception details when errors occur.
+- Avoid vague messages such as "Processing..." or "Something went wrong".
+- Do not log the same event repeatedly without a reason.
+
+The log should allow me to trace the complete lifecycle of a single book from input to final output.
+
+---
+
+## 7. Sequential and Logical Function Organization
+
+Function organization is another critical requirement.
+
+I want functions to appear in the same order that they are logically executed.
+
+For example, in `requests_apis/requests_handler.py`:
+
+1. Build request parameters.
+2. Send the request.
+3. Handle the response.
+4. Retrieve all pages.
+5. Retrieve Work details.
+6. Retrieve Editions.
+
+In `processing/data_processor.py`:
+
+1. Read input.
+2. Normalize data.
+3. Build search queries.
+4. Process Search results.
+5. Calculate matching scores.
+6. Select the best Work.
+7. Retrieve metadata.
+8. Build final results.
+9. Run the complete processing workflow.
+
+This is an illustrative order. Use the actual dependencies to determine the final order.
+
+Do not place related functions randomly throughout the file.
+
+A function should appear close to the functions it calls or supports.
+
+The reader should be able to follow the file from top to bottom and understand the workflow naturally.
+
+---
+
+## 8. Simple and Direct Communication Between Files
+
+The relationship between files must be extremely clear.
+
+Avoid complicated chains of function calls.
+
+Prefer a simple communication structure:
+
+```text
+main.py
+   |
+   v
+config/settings.py
+   |
+   v
+processing/data_processor.py
+   |
+   +------> requests_apis/requests_handler.py
+   |
+   +------> processing/storage.py
+```
+
+The actual implementation may use a slightly different structure if necessary.
+
+However:
+
+- Avoid unnecessary intermediate functions.
+- Avoid passing the same data through multiple layers.
+- Avoid unnecessary object creation.
+- Use clear function parameters and return values.
+- Each file should have a clearly defined responsibility.
+
+I want to know exactly which function sends data to another function and what that data contains.
+
+---
+
+## 9. Code Readability Standards
+
+Write the code as if you are teaching a junior engineer.
+
+Follow these standards:
+
+1. Use descriptive variable and function names.
+2. Prefer straightforward logic over clever one-line expressions.
+3. Avoid deeply nested conditions.
+4. Avoid unnecessary list comprehensions when a normal loop is easier to understand.
+5. Keep functions reasonably short, but do not split them artificially.
+6. Add comments where the reasoning is not obvious.
+7. Explain important decisions in comments, not every obvious line.
+8. Avoid excessive type abstractions.
+9. Use standard Python libraries whenever possible.
+10. Avoid adding dependencies without a real need.
+11. Keep error handling explicit and understandable.
+12. Avoid unnecessary global variables.
+
+The code must be easy to read, not merely short.
+
+---
+
+## 10. Refactoring and Validation Process
+
+Do not rewrite the entire project blindly.
+
+Follow this sequence:
+
+### Phase 1: Understand
+
+- Inspect every production file.
+- Identify the actual execution flow.
+- Identify unnecessary files, functions, classes, and abstractions.
+- Identify the essential behavior that must remain unchanged.
+- Run the existing tests and record the baseline.
+
+### Phase 2: Design the simpler architecture
+
+- Define the final 4–5 file structure.
+- Decide which functions belong in each file.
+- Define the communication between files.
+- Identify which data needs to be stored.
+- Keep the architecture straightforward.
+
+### Phase 3: Refactor
+
+- Refactor the existing implementation.
+- Remove unnecessary modules and code.
+- Combine trivial functions.
+- Simplify the data flow.
+- Simplify checkpoint and storage logic.
+- Implement detailed logging.
+- Preserve all required functionality.
+
+Do not leave old and new implementations running in parallel.
+
+Remove obsolete production files after verifying that nothing imports or depends on them.
+
+### Phase 4: Test
+
+Run the complete existing test suite.
+
+Update tests only when necessary to reflect the simplified internal structure, without weakening their assertions about required behavior.
+
+Verify:
+
+- Search API requests work with the Node4 proxy.
+- Pagination works correctly.
+- Offsets are correct.
+- Duplicate Work IDs are handled.
+- Matching scores are unchanged.
+- Work and Edition retrieval work.
+- Final output fields and formats are preserved.
+- Resume works after interruption.
+- Partial and failed searches are correctly reported.
+- Logging provides a complete execution trace.
+
+Compare the old and new implementations using the same controlled input and mocked API responses.
+
+The final results must match in content, field meanings, and matching decisions.
+
+Do not claim live API or proxy validation unless it was actually performed.
+
+### Phase 5: Cleanup
+
+- Remove unused production files.
+- Remove unused functions and dependencies.
+- Update imports.
+- Update README instructions.
+- Verify the final file tree.
+- Run tests again after cleanup.
+
+---
+
+## 11. Final Deliverables
+
+After completing the refactoring, provide:
+
+### A. Final project tree
+
+Show the complete updated file structure.
+
+### B. Refactoring summary
+
+Explain:
+- Which files were removed.
+- Which files were combined.
+- Which functions were removed or merged.
+- Which abstractions were eliminated.
+- How the data flow became simpler.
+
+### C. Final execution flow
+
+Provide a simple Mermaid diagram showing the actual execution sequence.
+
+### D. Function inventory
+
+List all remaining production functions, their file locations, and their responsibilities.
+
+### E. Logging example
+
+Show a realistic example of the new terminal logs for processing one book, from reading the input to saving the final result.
+
+### F. Test results
+
+Show the actual test results and explain any tests that were changed.
+
+### G. Remaining improvements
+
+List any genuinely useful improvements that were not implemented.
+
+Do not suggest complexity for the sake of making the project look more professional.
+
+---
+
+## 12. Non-Negotiable Rules
+
+1. Maximum 4–5 production Python files.
+2. Preserve the existing final output and matching behavior.
+3. Do not remove essential functionality.
+4. No unnecessary classes, layers, or abstractions.
+5. No artificial splitting into tiny functions.
+6. No unnecessary storage of input row data.
+7. Keep final results and recovery information safe.
+8. Detailed and traceable logging is mandatory.
+9. Organize functions in a logical execution order.
+10. Keep communication between files direct.
+11. Do not add unnecessary dependencies.
+12. Do not change proxy credentials or expose secrets.
+13. Do not claim tests passed unless they were executed.
+14. Do not leave obsolete code or duplicate implementations behind.
+15. Do not stop after proposing a plan. Actually implement, test, and validate the refactoring.
+
+**Final principle:**
+
+I want a simple project that does the same job, produces the same results, and is easy to understand.
+
+A junior engineer should be able to start at `main.py`, follow the execution step by step, understand every important function, and trace every request, response, transformation, and saved result without getting lost in unnecessary architecture.
+
+**Professional code does not mean complicated code. For this project, simplicity and clarity are the primary engineering requirements.**

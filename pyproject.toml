@@ -5,26 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openlibrary-search-scraper"
 version = "0.1.0"
-description = "Resumable, proxy-only Open Library Search API enrichment stage."
+description = "Simple Open Library scraper using an authenticated proxy."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "openpyxl>=3.1",
-    "pandas>=2.2",
     "python-dotenv>=1.0",
     "rapidfuzz>=3.9",
     "requests>=2.32",
 ]
 
-[project.optional-dependencies]
-test = ["pytest>=8.0"]
-
-[tool.setuptools.packages.find]
-include = ["openlibrary_scraper*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
+[tool.setuptools]
+packages = ["config", "requests_apis", "processing"]
+py-modules = ["main"]
 
 [tool.ruff]
 line-length = 100

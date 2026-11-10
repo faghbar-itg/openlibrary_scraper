@@ -6,34 +6,22 @@ The scraper reads book metadata from Excel, searches the Open Library Search API
 
 ## Architecture
 
-`main.py` loads settings and starts `processing/pipeline.py`. The package has three focused areas: configuration, Open Library requests, and post-response processing. See [docs/architecture.md](docs/architecture.md) and [docs/data_flow.md](docs/data_flow.md).
+`main.py` loads settings and starts the book workflow. Production code is grouped into three folders by responsibility. See [docs/architecture.md](docs/architecture.md), [docs/data_flow.md](docs/data_flow.md), and [docs/matching_logic.md](docs/matching_logic.md).
 
 ## Project layout
 
 ```text
 main.py
-openlibrary_scraper/
-  config/
-    settings.py       Environment and scraper configuration
-  requests/
-    client.py         Search, Work and Edition requests with proxy/retries
-    pagination.py     Search API pagination and query fallback
-    response_parser.py
-    retry.py
-  processing/
-    books.py          Excel input, book records and text normalization
-    matching.py       Candidate scoring and selection
-    metadata.py       Edition selection and final metadata mapping
-    pipeline.py       End-to-end workflow and orchestration
-    storage.py        Checkpoints and cached raw API responses
-    export.py         Excel, CSV and JSON output generation
-  errors.py           Shared scraper exceptions
+config/
+  settings.py         Environment validation and API/matching settings
+requests_apis/
+  requests_handler.py Proxied HTTP requests, response parsing, pagination
+processing/
+  data_processor.py   Workbook, matching, metadata, sequential workflow
+  storage.py          Atomic saving of final_books.json
 data/
   input/books.xlsx
   output/               Created at runtime
-tests/
-  unit/
-  integration/
 docs/
 ```
 
@@ -61,6 +49,7 @@ NODE4_PASSWORD=
 ```
 
 All four values are required before the scraper starts. The username and password are URL-encoded when the authenticated proxy URL is built. Both HTTP and HTTPS requests use this single configured proxy; there is no direct-connection fallback.
+Use `.env.example` as the variable-name template; put your private Node4 values in `.env`, not in the example file.
 `OPENLIBRARY_BASE_URL` optionally changes the API base URL (default `https://openlibrary.org`), and `EDITION_PAGE_SIZE` configures Edition page size (default `100`).
 
 ## Run
@@ -69,13 +58,7 @@ All four values are required before the scraper starts. The username and passwor
 python main.py
 ```
 
-Resume is enabled by default. To start a new run without reusing the current checkpoint:
-
-```powershell
-python main.py --fresh
-```
-
-The scraper reuses the configured Node4 proxy for sequential Open Library requests. Connection failures and timeouts use bounded retries through the same proxy; proxy authentication failures are reported as HTTP 407. After candidate matching, it retrieves the selected Work details and Editions, then chooses the most suitable Edition using publisher, year, language, and optional page-count criteria.
+The scraper reuses the configured Node4 proxy for sequential Open Library requests. Connection failures and timeouts use bounded retries through the same proxy; proxy authentication failures are reported as HTTP 407. Logs trace each API page, matching score, metadata request, and save operation without printing proxy credentials. The program writes only `data/output/final_books.json`; API responses and other intermediate values exist only in memory.
 
 ## Input validation
 
@@ -83,7 +66,7 @@ The active worksheet must contain `book_title`, `author`, `target_publisher`, `t
 
 ## Pagination and recovery
 
-The Search API's `numFound`, exactness flag, `start`, and `docs` drive pagination. Requests continue using actual response starts and received record counts, deduplicate valid Work IDs, and stop at `MAX_PAGES`. Missing/inconsistent totals, premature empty pages, and count changes are recorded as uncertainty or errors. Each raw page is saved before its checkpoint advances. Checkpoints allow already saved pages to be reused after interruption.
+The Search API's `numFound`, exactness flag, `start`, and `docs` drive pagination. Requests continue using actual response starts and received record counts, deduplicate valid Work IDs, and stop at `MAX_PAGES`. Missing/inconsistent totals, premature empty pages, and count changes are recorded as uncertainty or errors. Responses stay in memory and are discarded after the current book is processed.
 
 ## Matching
 
@@ -91,30 +74,17 @@ Each candidate gets independent title, author, publisher, year, and language sco
 
 ## Outputs
 
-The following are written under `data/output/`:
-
-- `raw_search/<run_id>/<book_id>/query_<hash>/page_NNN.json` and per-book `metadata.json`
-- `search_results.xlsx` and `search_results.csv` (all Work candidates and scores)
-- `best_work_matches.xlsx` and `best_work_matches.csv` (one row per input book)
-- `execution_report.json` (counts, status, errors, warnings, proxy statistics; no credentials)
-- `final_books.json` (one consolidated metadata object per input book, in input order)
-- `checkpoints/current.json`
-- `raw_search/<run_id>/<book_id>/details/` (cached Work details and Editions API responses)
-
-Structured output files are updated on each successful run; raw responses are isolated by run ID.
-
-## Tests
-
-```powershell
-python -m pytest
-```
-
-The suite uses mocked search responses and does not require a live proxy. Tests do not contact external services.
+Only `final_books.json` is written under `data/output/`. It contains one
+consolidated metadata object per input book in input order. It is atomically
+replaced after each processed book, so completed results survive an
+interruption. Search pages, Work details, Edition pages, candidate scores,
+checkpoints, and reports are not saved.
 
 ## Troubleshooting
 
 - **Missing proxy configuration:** set each of `NODE4_HOST`, `NODE4_PORT`, `NODE4_USERNAME`, and `NODE4_PASSWORD` in `.env`.
 - **Proxy authentication failure (HTTP 407):** verify the Node4 username and password.
 - **Proxy connection failure or timeout:** verify Node4 connectivity and the configured host and port.
+- **Excel output is open/locked:** progressive CSV/JSON outputs continue to update and the report records the workbook error. Close the output workbook and rerun to refresh its XLSX file.
 - **Missing/invalid workbook fields:** correct a copy of the workbook; the original is never changed.
-- **Incomplete search:** inspect per-book raw metadata and the execution report; rerun to resume, or pass `--fresh` to begin a clean run.
+- **Incomplete search:** inspect the terminal logs. A rerun starts from the first input book because intermediate responses and checkpoints are intentionally not stored.
